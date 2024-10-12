@@ -18,6 +18,33 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
+var (
+	dynamoDBClient *dynamodb.Client
+	dynamoDBExpr   *expression.Expression
+)
+
+func init() {
+	// Initialize the DynamoDB client outside of the handler, during the init phase
+	cfg, err := config.LoadDefaultConfig(context.TODO(),
+		config.WithRegion("ca-central-1"),
+	)
+	if err != nil {
+		log.Fatalf("unable to load SDK config, %v", err)
+	}
+
+	// Create the DynamoDB client
+	dynamoDBClient = dynamodb.NewFromConfig(cfg)
+
+	// Build DynamoDB update expression
+	update := expression.Set(expression.Name("Status"), expression.Value("uploaded"))
+	expr, err := expression.NewBuilder().WithUpdate(update).Build()
+	if err != nil {
+		log.Fatalf("Couldn't build expression for update. Here's why: %v\n", err)
+	} else {
+		dynamoDBExpr = &expr
+	}
+}
+
 // input: "cv-cs1f56el089s714shag0-1728246425601.tar.gz"
 // output: "cv-cs1f56el089s714shag0"
 func ExtractConfigVerionId(s3ObjectKey string) (string, error) {
@@ -38,19 +65,6 @@ func HandleRequest(ctx context.Context, s3Event events.S3Event) {
 			panic(err)
 		}
 
-		// Using the SDK's default configuration, loading additional config
-		// and credentials values from the environment variables, shared
-		// credentials, and shared configuration files
-		cfg, err := config.LoadDefaultConfig(context.TODO(),
-			config.WithRegion("ca-central-1"),
-		)
-		if err != nil {
-			log.Fatalf("unable to load SDK config, %v", err)
-		}
-
-		// Create the DynamoDB client
-		svc := dynamodb.NewFromConfig(cfg)
-
 		// Marshall DynamoDB primary key
 		// Returns {"S": "cv-cs1f56el089s714shag0"}
 		mConfigurationVersionId, err := attributevalue.Marshal(configurationVersionId)
@@ -58,19 +72,12 @@ func HandleRequest(ctx context.Context, s3Event events.S3Event) {
 			panic(err)
 		}
 
-		// Build DynamoDB update expression
-		update := expression.Set(expression.Name("Status"), expression.Value("uploaded"))
-		expr, err := expression.NewBuilder().WithUpdate(update).Build()
-		if err != nil {
-			log.Fatalf("Couldn't build expression for update. Here's why: %v\n", err)
-		}
-
-		_, err = svc.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		_, err = dynamoDBClient.UpdateItem(ctx, &dynamodb.UpdateItemInput{
 			TableName:                 aws.String("configuration-versions"),
 			Key:                       map[string]types.AttributeValue{"ID": mConfigurationVersionId},
-			ExpressionAttributeNames:  expr.Names(),
-			ExpressionAttributeValues: expr.Values(),
-			UpdateExpression:          expr.Update(),
+			ExpressionAttributeNames:  dynamoDBExpr.Names(),
+			ExpressionAttributeValues: dynamoDBExpr.Values(),
+			UpdateExpression:          dynamoDBExpr.Update(),
 		})
 		if err != nil {
 			log.Fatalf("Couldn't update configuration version %v. Here's why: %v\n", configurationVersionId, err)
