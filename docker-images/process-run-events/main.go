@@ -146,7 +146,6 @@ func processSqsMessage(msg types.Message) error {
 
 	// Fetch configuration version package
 	downloadFilePath := getTfConfigDownloadFilePath(configVersionS3ObjectKey)
-	log.Printf("downloadFilePath=%v", downloadFilePath)
 	err = s3Actions.downloadTfConfig(configVersionS3ObjectKey, S3_BUCKET_TF_CONFIGS, downloadFilePath)
 
 	// Unzip terraform configuration
