@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"os"
 	"os/exec"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -48,35 +50,34 @@ func (actor SqsActions) GetMessages(ctx context.Context, queueUrl string, maxMes
 }
 
 func switchTfVersion(version string, cache bool) {
+	defer timeTrack(time.Now(), "switchtfversion")
 	var cmd *exec.Cmd
 	if cache {
 		cmd = exec.Command("tfswitch", "-i", CACHE_MOUNPOINT+"/terraform", version)
 	} else {
 		cmd = exec.Command("tfswitch", version)
 	}
-	stdout, err := cmd.Output()
+	_, err := cmd.Output()
 
 	if err != nil {
 		log.Println("tfswitch. error:" + err.Error())
 	}
-
-	log.Println("tfswitch. stdout:" + string(stdout))
 }
 
-func displayTfVersion() {
-	app := "terraform"
-	arg0 := "-version"
-
-	cmd := exec.Command(app, arg0)
-	stdout, err := cmd.Output()
-
-	if err != nil {
-		log.Println(err.Error())
-	}
-
-	// Print the output
-	log.Println("displayTfVersion:" + string(stdout))
-}
+//func displayTfVersion() {
+//	app := "terraform"
+//	arg0 := "-version"
+//
+//	cmd := exec.Command(app, arg0)
+//	stdout, err := cmd.Output()
+//
+//	if err != nil {
+//		log.Println(err.Error())
+//	}
+//
+//	// Print the output
+//	log.Println("displayTfVersion:" + string(stdout))
+//}
 
 func listDir(path string) {
 	log.Printf("Listing content of dir=%v", path)
@@ -90,34 +91,65 @@ func listDir(path string) {
 	}
 }
 
-func main() {
-	listDir(CACHE_MOUNPOINT + "/terraform/.terraform.versions")
-	// tfswitch to 1.9.7 using custom install dir
+type RunInputMsg struct {
+	ConfigVersionId          string `json:"configVersionId"`
+	ConfigVersionS3ObjectKey string `json:"configVersionS3ObjectKey"`
+}
+
+func unmarshalRunInputMsg(payload string) (RunInputMsg, error) {
+	defer timeTrack(time.Now(), "unmarshal-msg-payload")
+	var runInputMsg RunInputMsg
+	//if err := json.Unmarshal([]byte(payload), &runInputMsg); err =! nil {
+	err := json.Unmarshal([]byte(payload), &runInputMsg)
+	if err != nil {
+		panic(err)
+	}
+	return runInputMsg, nil
+}
+
+func timeTrack(start time.Time, name string) {
+	elapsed := time.Since(start)
+	log.Printf("%s took %d ms", name, elapsed.Milliseconds())
+}
+
+func processSqsMessage(msg types.Message) error {
+	defer timeTrack(time.Now(), "process-sqs-msg")
+	log.Printf("Processing message with ID=%v, Body=%v", *msg.MessageId, *msg.Body)
+
+	// Unmarshall SQS message JSON payload
+	runInputMsg, err := unmarshalRunInputMsg(*msg.Body)
+	if err != nil {
+		return err
+	}
+	log.Printf(
+		"configVersionId=%v, configVersionS3ObjectKey=%v",
+		runInputMsg.ConfigVersionId,
+		runInputMsg.ConfigVersionS3ObjectKey,
+	)
+
+	// Fetch configuration version package
+	// TODO
+
+	// Set proper Terraform binary version
 	switchTfVersion("1.9.7", true)
-	displayTfVersion()
-	// tfswitch to 1.9.7 using custom install dir
-	switchTfVersion("1.9.7", false)
-	displayTfVersion()
-	// tfswitch to 1.8.5 custom install dir
-	switchTfVersion("1.8.5", true)
-	displayTfVersion()
-	// tfswitch to 1.8.5 custom install dir
-	switchTfVersion("1.8.5", false)
-	displayTfVersion()
-	// tfswitch to 1.8.3 custom install dir
-	switchTfVersion("1.8.3", true)
-	displayTfVersion()
-	// tfswitch to 1.8.3 custom install dir
-	switchTfVersion("1.8.3", false)
-	displayTfVersion()
+
+	return nil
+}
+
+func main() {
+	//listDir(CACHE_MOUNPOINT + "/terraform/.terraform.versions")
 
 	sqsActions := newSqsActions()
 	for {
-		messages, _ := sqsActions.GetMessages(context.TODO(), QUEUE_URL, 2, 5)
+		messages, _ := sqsActions.GetMessages(context.TODO(), QUEUE_URL, 5, 10)
+		if len(messages) > 0 {
+			log.Printf("Fetched %d messages from queue", len(messages))
+		}
 
-		log.Printf("Received %d messages", len(messages))
 		for _, msg := range messages {
-			log.Printf("Received message with ID=%v, Body=%v", *msg.MessageId, *msg.Body)
+			if err := processSqsMessage(msg); err != nil {
+				log.Printf("Error when processing sqs msg: %v", err.Error())
+			}
 		}
 	}
 }
