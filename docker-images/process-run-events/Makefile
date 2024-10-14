@@ -1,9 +1,10 @@
 AWS_ACCOUNT_ID = 253789223556
 AWS_REGION = ca-central-1
 DOCKER_IMAGE_NAME = process-run-events
+SQS_QUEUE_URL = https://sqs.ca-central-1.amazonaws.com/253789223556/tfc-run-events
 
 all : run-event-handler
-.PHONY : all dist install clean
+.PHONY : all dist install clean publish-msgs
 
 SHELL=/bin/bash
 
@@ -19,8 +20,11 @@ install : dist
 	docker build --tag ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${DOCKER_IMAGE_NAME}:latest .
 	sudo docker push ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${DOCKER_IMAGE_NAME}:latest
 
-test:
-	# TODO
+publish-msgs :
+	for i in {1..${MSG_NUMBERS}}; \
+	do \
+		aws sqs send-message --queue-url ${SQS_QUEUE_URL} --message-body file://sqs-msg-payload.json; \
+	done; 
 
 clean :
 	rm run-event-handler
