@@ -33,7 +33,6 @@ func newSqsActions() *SqsActions {
 	return &SqsActions{SqsClient: sqs.NewFromConfig(cfg)}
 }
 
-// GetMessages uses the ReceiveMessage action to get messages from an Amazon SQS queue.
 func (actor SqsActions) GetMessages(ctx context.Context, queueUrl string, maxMessages int32, waitTime int32) ([]types.Message, error) {
 	var messages []types.Message
 	result, err := actor.SqsClient.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
@@ -47,6 +46,17 @@ func (actor SqsActions) GetMessages(ctx context.Context, queueUrl string, maxMes
 		messages = result.Messages
 	}
 	return messages, err
+}
+
+func (actor SqsActions) DeleteMessage(ctx context.Context, queueurl string, receipthandle string) {
+	defer timeTrack(time.Now(), "delete-sqs-message")
+	_, err := actor.SqsClient.DeleteMessage(ctx, &sqs.DeleteMessageInput{
+		QueueUrl:      aws.String(queueurl),
+		ReceiptHandle: &receipthandle,
+	})
+	if err != nil {
+		log.Printf("couldn't delete message from queue %v. here's why: %v\n", queueurl, err)
+	}
 }
 
 func switchTfVersion(version string, cache bool) {
@@ -150,6 +160,7 @@ func main() {
 			if err := processSqsMessage(msg); err != nil {
 				log.Printf("Error when processing sqs msg: %v", err.Error())
 			}
+			sqsActions.DeleteMessage(context.TODO(), QUEUE_URL, *msg.ReceiptHandle)
 		}
 	}
 }
