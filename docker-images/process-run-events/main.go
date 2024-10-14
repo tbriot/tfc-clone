@@ -128,7 +128,7 @@ func timeTrack(start time.Time, name string) {
 
 func processSqsMessage(msg types.Message) error {
 	defer timeTrack(time.Now(), "process-sqs-msg")
-	log.Printf("Processing message with ID=%v, Body=%v", *msg.MessageId, *msg.Body)
+	log.Printf("Processing message with ID=%v", *msg.MessageId)
 
 	// Unmarshall SQS message JSON payload
 	runInputMsg, err := unmarshalRunInputMsg(*msg.Body)
@@ -154,11 +154,32 @@ func processSqsMessage(msg types.Message) error {
 	// Set proper Terraform binary version
 	switchTfVersion("1.9.7", true)
 
+	// Run terraform init
+	tfInit()
+
 	return nil
 }
 
+func tfInit() {
+	defer timeTrack(time.Now(), "tf-init")
+
+	dirname, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	cmd := exec.Command("terraform", "init", "-no-color")
+	cmd.Dir = filepath.Join(dirname, TF_CONFIG_DIRNAME)
+	stdout, err := cmd.Output()
+
+	if err != nil {
+		log.Println("Error while applying terraform init: " + err.Error())
+	}
+	// Print the output
+	log.Println("Ouput of tf init: " + string(stdout))
+}
+
 func unzipTfConfigPackage(filepath string) {
-	// tar -xvf cv-cs59r2cp5s7s71423rp0-1728748937244.tar.gz -C ./toto --strip-components=1
 	defer timeTrack(time.Now(), "unzip-tf-config")
 
 	// create target directory if not existing
