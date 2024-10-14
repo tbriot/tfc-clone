@@ -20,7 +20,7 @@ import (
 const QUEUE_URL = "https://sqs.ca-central-1.amazonaws.com/253789223556/tfc-run-events"
 const CACHE_MOUNPOINT = "/opt/tfc-cache"
 const S3_BUCKET_TF_CONFIGS = "tfc-configuration-files"
-const TF_CONFIG_DOWNLOAD_DIRNAME = "/tf-config"
+const TF_CONFIG_DIRNAME = "/tf-config"
 
 // SqsActions encapsulates the Amazon Simple Queue Service (Amazon SQS) actions
 type SqsActions struct {
@@ -149,11 +149,8 @@ func processSqsMessage(msg types.Message) error {
 	log.Printf("downloadFilePath=%v", downloadFilePath)
 	err = s3Actions.downloadTfConfig(configVersionS3ObjectKey, S3_BUCKET_TF_CONFIGS, downloadFilePath)
 
-	listDir("/home/app")
-	listDir("/home/app/tf-config")
-
 	// Unzip terraform configuration
-	// TODO
+	unzipTfConfigPackage(downloadFilePath)
 
 	// Set proper Terraform binary version
 	switchTfVersion("1.9.7", true)
@@ -161,16 +158,33 @@ func processSqsMessage(msg types.Message) error {
 	return nil
 }
 
+func unzipTfConfigPackage(filepath string) {
+	// tar -xvf cv-cs59r2cp5s7s71423rp0-1728748937244.tar.gz -C ./toto --strip-components=1
+	defer timeTrack(time.Now(), "unzip-tf-config")
+
+	// create target directory if not existing
+	dirname, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatal(err)
+	}
+	tfConfigDir := dirname + TF_CONFIG_DIRNAME
+	_ = os.Mkdir(tfConfigDir, 0755)
+
+	cmd := exec.Command("tar", "-xf", filepath, "--strip-components=1", "-C", tfConfigDir)
+	_, err = cmd.Output()
+
+	if err != nil {
+		log.Println("Error while unzipping tf config package: " + err.Error())
+	}
+}
+
 func getTfConfigDownloadFilePath(s3ObjectKey string) string {
 	dirname, err := os.UserHomeDir()
 	if err != nil {
 		log.Fatal(err)
 	}
-	// create target directory if not existing
-	downloadDir := dirname + TF_CONFIG_DOWNLOAD_DIRNAME
-	_ = os.Mkdir(downloadDir, 0755)
 
-	return filepath.Join(downloadDir, s3ObjectKey)
+	return filepath.Join(dirname, s3ObjectKey)
 }
 
 func (actor S3Actions) downloadTfConfig(objectKey string, bucketName string, fileName string) error {
