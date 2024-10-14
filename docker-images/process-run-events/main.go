@@ -3,19 +3,24 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 )
 
 const QUEUE_URL = "https://sqs.ca-central-1.amazonaws.com/253789223556/tfc-run-events"
 const CACHE_MOUNPOINT = "/opt/tfc-cache"
+const S3_BUCKET_TF_CONFIGS = "tfc-configuration-files"
+const TF_CONFIG_DOWNLOAD_DIRNAME = "/tf-config"
 
 // SqsActions encapsulates the Amazon Simple Queue Service (Amazon SQS) actions
 type SqsActions struct {
@@ -31,6 +36,21 @@ func newSqsActions() *SqsActions {
 	}
 
 	return &SqsActions{SqsClient: sqs.NewFromConfig(cfg)}
+}
+
+type S3Actions struct {
+	S3Client *s3.Client
+}
+
+func newS3Actions() *S3Actions {
+	cfg, err := config.LoadDefaultConfig(context.TODO(),
+		config.WithRegion("ca-central-1"),
+	)
+	if err != nil {
+		log.Fatalf("unable to load SDK config, %v", err)
+	}
+
+	return &S3Actions{S3Client: s3.NewFromConfig(cfg)}
 }
 
 func (actor SqsActions) GetMessages(ctx context.Context, queueUrl string, maxMessages int32, waitTime int32) ([]types.Message, error) {
@@ -74,21 +94,6 @@ func switchTfVersion(version string, cache bool) {
 	}
 }
 
-//func displayTfVersion() {
-//	app := "terraform"
-//	arg0 := "-version"
-//
-//	cmd := exec.Command(app, arg0)
-//	stdout, err := cmd.Output()
-//
-//	if err != nil {
-//		log.Println(err.Error())
-//	}
-//
-//	// Print the output
-//	log.Println("displayTfVersion:" + string(stdout))
-//}
-
 func listDir(path string) {
 	log.Printf("Listing content of dir=%v", path)
 	entries, err := os.ReadDir(path)
@@ -109,7 +114,6 @@ type RunInputMsg struct {
 func unmarshalRunInputMsg(payload string) (RunInputMsg, error) {
 	defer timeTrack(time.Now(), "unmarshal-msg-payload")
 	var runInputMsg RunInputMsg
-	//if err := json.Unmarshal([]byte(payload), &runInputMsg); err =! nil {
 	err := json.Unmarshal([]byte(payload), &runInputMsg)
 	if err != nil {
 		panic(err)
@@ -131,13 +135,24 @@ func processSqsMessage(msg types.Message) error {
 	if err != nil {
 		return err
 	}
+	configVersionId := runInputMsg.ConfigVersionId
+	configVersionS3ObjectKey := runInputMsg.ConfigVersionS3ObjectKey
+
 	log.Printf(
 		"configVersionId=%v, configVersionS3ObjectKey=%v",
-		runInputMsg.ConfigVersionId,
-		runInputMsg.ConfigVersionS3ObjectKey,
+		configVersionId,
+		configVersionS3ObjectKey,
 	)
 
 	// Fetch configuration version package
+	downloadFilePath := getTfConfigDownloadFilePath(configVersionS3ObjectKey)
+	log.Printf("downloadFilePath=%v", downloadFilePath)
+	err = s3Actions.downloadTfConfig(configVersionS3ObjectKey, S3_BUCKET_TF_CONFIGS, downloadFilePath)
+
+	listDir("/home/app")
+	listDir("/home/app/tf-config")
+
+	// Unzip terraform configuration
 	// TODO
 
 	// Set proper Terraform binary version
@@ -146,10 +161,50 @@ func processSqsMessage(msg types.Message) error {
 	return nil
 }
 
+func getTfConfigDownloadFilePath(s3ObjectKey string) string {
+	dirname, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatal(err)
+	}
+	// create target directory if not existing
+	downloadDir := dirname + TF_CONFIG_DOWNLOAD_DIRNAME
+	_ = os.Mkdir(downloadDir, 0755)
+
+	return filepath.Join(downloadDir, s3ObjectKey)
+}
+
+func (actor S3Actions) downloadTfConfig(objectKey string, bucketName string, fileName string) error {
+	defer timeTrack(time.Now(), "downloadTfConfig")
+
+	result, err := actor.S3Client.GetObject(context.TODO(), &s3.GetObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(objectKey),
+	})
+	if err != nil {
+		log.Printf("Couldn't get object %v:%v. Here's why: %v\n", bucketName, objectKey, err)
+		return err
+	}
+	defer result.Body.Close()
+	file, err := os.Create(fileName)
+	if err != nil {
+		log.Printf("Couldn't create file %v. Here's why: %v\n", fileName, err)
+		return err
+	}
+	defer file.Close()
+	body, err := io.ReadAll(result.Body)
+	if err != nil {
+		log.Printf("Couldn't read object body from %v. Here's why: %v\n", objectKey, err)
+	}
+	_, err = file.Write(body)
+	return err
+}
+
+var sqsActions = newSqsActions()
+var s3Actions = newS3Actions()
+
 func main() {
 	//listDir(CACHE_MOUNPOINT + "/terraform/.terraform.versions")
 
-	sqsActions := newSqsActions()
 	for {
 		messages, _ := sqsActions.GetMessages(context.TODO(), QUEUE_URL, 5, 10)
 		if len(messages) > 0 {
