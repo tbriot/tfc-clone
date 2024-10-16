@@ -152,12 +152,27 @@ func processSqsMessage(msg types.Message) error {
 	unzipTfConfigPackage(downloadFilePath)
 
 	// Set proper Terraform binary version
-	switchTfVersion("1.9.7", true)
+	switchTfVersion("1.9.6", true)
 
 	// Run terraform init
 	tfInit()
 
+	// Clean config files
+	cleanConfig()
+
 	return nil
+}
+
+func cleanConfig() {
+	defer timeTrack(time.Now(), "cleanConfig")
+	dirname, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = os.RemoveAll(filepath.Join(dirname, TF_CONFIG_DIRNAME))
+	if err != nil {
+		log.Println("Error while deleting all files of tf config: " + err.Error())
+	}
 }
 
 func tfInit() {
