@@ -109,6 +109,7 @@ func listDir(path string) {
 type RunInputMsg struct {
 	ConfigVersionId          string `json:"configVersionId"`
 	ConfigVersionS3ObjectKey string `json:"configVersionS3ObjectKey"`
+	WorkspaceId              string `json:"workspaceId"`
 }
 
 func unmarshalRunInputMsg(payload string) (RunInputMsg, error) {
@@ -137,6 +138,7 @@ func processSqsMessage(msg types.Message) error {
 	}
 	configVersionId := runInputMsg.ConfigVersionId
 	configVersionS3ObjectKey := runInputMsg.ConfigVersionS3ObjectKey
+	workspaceId := runInputMsg.WorkspaceId
 
 	log.Printf(
 		"configVersionId=%v, configVersionS3ObjectKey=%v",
@@ -154,6 +156,9 @@ func processSqsMessage(msg types.Message) error {
 	// Set proper Terraform binary version
 	switchTfVersion("1.9.6", true)
 
+	// Set workspace variables
+	setWorkspaceVars(workspaceId)
+
 	// Run terraform init
 	tfInit()
 
@@ -161,6 +166,25 @@ func processSqsMessage(msg types.Message) error {
 	cleanConfig()
 
 	return nil
+}
+
+type Variable struct {
+	key   string
+	value string
+}
+
+func setWorkspaceVars(wsId string) {
+	// get workspace variables
+	vars := getWorkspaceVars(wsId)
+
+	// set environment variables
+}
+
+func getWorkspaceVars(wsId string) []Variable {
+	// get workspace variables
+	return []Variable{
+		{key: "myKey", value: "myValue"},
+	}
 }
 
 func cleanConfig() {
