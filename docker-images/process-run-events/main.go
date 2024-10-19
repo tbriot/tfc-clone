@@ -27,6 +27,8 @@ const (
 	S3_BUCKET_TF_CONFIGS = "tfc-configuration-files"
 	TF_CONFIG_DIRNAME    = "/tf-config"
 	VARIABLES_TABLE      = "vars"
+	VAR_CATEGORY_ENV     = "env"
+	VAR_CATEGORY_TF      = "terraform"
 )
 
 // SqsActions encapsulates the Amazon Simple Queue Service (Amazon SQS) actions
@@ -76,6 +78,7 @@ func newDynamoDBActions() *DynamoDBActions {
 }
 
 func (actor DynamoDBActions) GetVariables(ctx context.Context, wsId string, table string) ([]Variable, error) {
+	defer timeTrack(time.Now(), "query-variables-dynamodb")
 	var (
 		err       error
 		variables []Variable
@@ -226,20 +229,21 @@ func processSqsMessage(msg types.Message) error {
 }
 
 type Variable struct {
-	id          string             `dynamodbav:"id"`
-	workspaceId string             `dynamodbav:"workspace-id"`
-	varType     string             `dynamodbav:"type"`
-	attributes  VariableAttributes `dynamodbav:"attributes"`
+	Id          string             `dynamodbav:"id"`
+	WorkspaceId string             `dynamodbav:"workspace-id"`
+	VarType     string             `dynamodbav:"type"`
+	Attributes  VariableAttributes `dynamodbav:"attributes"`
 }
 
 type VariableAttributes struct {
-	key       string `dynamodbav:"key"`
-	value     string `dynamodbav:"value"`
-	category  string `dynamodbav:"category"`
-	sensitive bool   `dynamodbav:"sensitive"`
+	Key       string `dynamodbav:"key"`
+	Value     string `dynamodbav:"value"`
+	Category  string `dynamodbav:"category"`
+	Sensitive bool   `dynamodbav:"sensitive"`
 }
 
 func setWorkspaceVars(wsId string) {
+	defer timeTrack(time.Now(), "set-workspace-id")
 	// get workspace variables
 	dynamoDBActions := *newDynamoDBActions()
 	vars, err := dynamoDBActions.GetVariables(context.TODO(), wsId, VARIABLES_TABLE)
@@ -250,12 +254,17 @@ func setWorkspaceVars(wsId string) {
 
 	fmt.Printf("Retrieved %d variables from DynamoDB", len(vars))
 
-	for _, v := range vars {
-		fmt.Println("Variable id:", v.id)
-		fmt.Printf("%#v\n", v)
-	}
-
 	// set environment variables
+	for _, v := range vars {
+		switch v.Attributes.Category {
+		case VAR_CATEGORY_ENV:
+			os.Setenv(v.Attributes.Key, v.Attributes.Value)
+		case VAR_CATEGORY_TF:
+			os.Setenv("TF_VAR_"+v.Attributes.Key, v.Attributes.Value)
+		default:
+			fmt.Printf("Unexpected variable category='%v'.", v.Attributes.Category)
+		}
+	}
 
 	return
 }
