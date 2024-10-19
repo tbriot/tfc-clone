@@ -247,8 +247,17 @@ func setWorkspaceVars(wsId string) {
 		fmt.Printf("Could not retrieve variables from DynamoDB: %s\n", err.Error())
 		return
 	}
+
 	fmt.Printf("Retrieved %d variables from DynamoDB", len(vars))
+
+	for _, v := range vars {
+		fmt.Println("Variable id:", v.id)
+		fmt.Printf("%#v\n", v)
+	}
+
 	// set environment variables
+
+	return
 }
 
 func cleanConfig() {
