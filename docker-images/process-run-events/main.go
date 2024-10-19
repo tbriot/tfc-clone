@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -12,15 +13,21 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 )
 
-const QUEUE_URL = "https://sqs.ca-central-1.amazonaws.com/253789223556/tfc-run-events"
-const CACHE_MOUNPOINT = "/opt/tfc-cache"
-const S3_BUCKET_TF_CONFIGS = "tfc-configuration-files"
-const TF_CONFIG_DIRNAME = "/tf-config"
+const (
+	QUEUE_URL            = "https://sqs.ca-central-1.amazonaws.com/253789223556/tfc-run-events"
+	CACHE_MOUNPOINT      = "/opt/tfc-cache"
+	S3_BUCKET_TF_CONFIGS = "tfc-configuration-files"
+	TF_CONFIG_DIRNAME    = "/tf-config"
+	VARIABLES_TABLE      = "vars"
+)
 
 // SqsActions encapsulates the Amazon Simple Queue Service (Amazon SQS) actions
 type SqsActions struct {
@@ -51,6 +58,56 @@ func newS3Actions() *S3Actions {
 	}
 
 	return &S3Actions{S3Client: s3.NewFromConfig(cfg)}
+}
+
+type DynamoDBActions struct {
+	DymamoDBClient *dynamodb.Client
+}
+
+func newDynamoDBActions() *DynamoDBActions {
+	cfg, err := config.LoadDefaultConfig(context.TODO(),
+		config.WithRegion("ca-central-1"),
+	)
+	if err != nil {
+		log.Fatalf("unable to load SDK config, %v", err)
+	}
+
+	return &DynamoDBActions{DymamoDBClient: dynamodb.NewFromConfig(cfg)}
+}
+
+func (actor DynamoDBActions) GetVariables(ctx context.Context, wsId string, table string) ([]Variable, error) {
+	var (
+		err       error
+		variables []Variable
+		response  *dynamodb.QueryOutput
+	)
+	keyEx := expression.Key("workspace-id").Equal(expression.Value(wsId))
+	expr, err := expression.NewBuilder().WithKeyCondition(keyEx).Build()
+	if err != nil {
+		return nil, fmt.Errorf("Couldn't build expression to query variables from DynamoDB: %w\n", err)
+	} else {
+		queryPaginator := dynamodb.NewQueryPaginator(actor.DymamoDBClient, &dynamodb.QueryInput{
+			TableName:                 aws.String(table),
+			ExpressionAttributeNames:  expr.Names(),
+			ExpressionAttributeValues: expr.Values(),
+			KeyConditionExpression:    expr.KeyCondition(),
+		})
+		for queryPaginator.HasMorePages() {
+			response, err = queryPaginator.NextPage(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("Couldn't query variables for workspaceId=%s: %w\n", wsId, err)
+			} else {
+				var variablePage []Variable
+				err = attributevalue.UnmarshalListOfMaps(response.Items, &variablePage)
+				if err != nil {
+					return nil, fmt.Errorf("Couldn't unmarshal query response for workspaceId=%s: %w\n", wsId, err)
+				} else {
+					variables = append(variables, variablePage...)
+				}
+			}
+		}
+	}
+	return variables, nil
 }
 
 func (actor SqsActions) GetMessages(ctx context.Context, queueUrl string, maxMessages int32, waitTime int32) ([]types.Message, error) {
@@ -169,22 +226,29 @@ func processSqsMessage(msg types.Message) error {
 }
 
 type Variable struct {
-	key   string
-	value string
+	id          string             `dynamodbav:"id"`
+	workspaceId string             `dynamodbav:"workspace-id"`
+	varType     string             `dynamodbav:"type"`
+	attributes  VariableAttributes `dynamodbav:"attributes"`
+}
+
+type VariableAttributes struct {
+	key       string `dynamodbav:"key"`
+	value     string `dynamodbav:"value"`
+	category  string `dynamodbav:"category"`
+	sensitive bool   `dynamodbav:"sensitive"`
 }
 
 func setWorkspaceVars(wsId string) {
 	// get workspace variables
-	vars := getWorkspaceVars(wsId)
-
-	// set environment variables
-}
-
-func getWorkspaceVars(wsId string) []Variable {
-	// get workspace variables
-	return []Variable{
-		{key: "myKey", value: "myValue"},
+	dynamoDBActions := *newDynamoDBActions()
+	vars, err := dynamoDBActions.GetVariables(context.TODO(), wsId, VARIABLES_TABLE)
+	if err != nil {
+		fmt.Printf("Could not retrieve variables from DynamoDB: %s\n", err.Error())
+		return
 	}
+	fmt.Printf("Retrieved %d variables from DynamoDB", len(vars))
+	// set environment variables
 }
 
 func cleanConfig() {
