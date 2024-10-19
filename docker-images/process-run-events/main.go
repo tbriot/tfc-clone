@@ -19,11 +19,13 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	"github.com/hashicorp/terraform-exec/tfexec"
 )
 
 const (
 	QUEUE_URL            = "https://sqs.ca-central-1.amazonaws.com/253789223556/tfc-run-events"
 	CACHE_MOUNPOINT      = "/opt/tfc-cache"
+	TF_EXEC_PATH         = "/home/app/.bin/terraform"
 	S3_BUCKET_TF_CONFIGS = "tfc-configuration-files"
 	TF_CONFIG_DIRNAME    = "/tf-config"
 	VARIABLES_TABLE      = "vars"
@@ -219,13 +221,38 @@ func processSqsMessage(msg types.Message) error {
 	// Set workspace variables
 	setWorkspaceVars(workspaceId)
 
+	// Init Terrfaform
+	workingDir, execPath := mustGetTFConfigDir(), TF_EXEC_PATH
+	tf, err := tfexec.NewTerraform(workingDir, execPath)
+	if err != nil {
+		log.Fatalf("error running NewTerraform: %s", err)
+	}
+
 	// Run terraform init
-	tfInit()
+	//tfInit()
+	mustRunTfInit(tf)
+
+	// Run terraform plan
+	//result, err := tf.Plan(context.Background())
+	//if err != nil {
+	//	log.Fatalf("Error running tf plan: %t\n", err)
+	//}
+
+	//fmt.Printf("TF plan result is:%b", result)
 
 	// Clean config files
 	cleanConfig()
 
 	return nil
+}
+
+func mustRunTfInit(tf *tfexec.Terraform) {
+	defer timeTrack(time.Now(), "terraform-init")
+	err := tf.Init(context.Background())
+	if err != nil {
+		log.Fatalf("Error running tf init: %t\n", err)
+	}
+	return
 }
 
 type Variable struct {
@@ -252,7 +279,7 @@ func setWorkspaceVars(wsId string) {
 		return
 	}
 
-	fmt.Printf("Retrieved %d variables from DynamoDB", len(vars))
+	fmt.Printf("Retrieved %d variables from DynamoDB\n", len(vars))
 
 	// set environment variables
 	for _, v := range vars {
@@ -279,6 +306,14 @@ func cleanConfig() {
 	if err != nil {
 		log.Println("Error while deleting all files of tf config: " + err.Error())
 	}
+}
+
+func mustGetTFConfigDir() string {
+	dirname, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatal(err)
+	}
+	return filepath.Join(dirname, TF_CONFIG_DIRNAME)
 }
 
 func tfInit() {
