@@ -17,13 +17,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/aws/aws-sdk-go-v2/service/sqs"
-	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
-	"github.com/hashicorp/terraform-exec/tfexec"
 )
 
 const (
-	QUEUE_URL            = "https://sqs.ca-central-1.amazonaws.com/253789223556/tfc-run-events"
 	CACHE_MOUNPOINT      = "/opt/tfc-cache"
 	TF_EXEC_PATH         = "/home/app/.bin/terraform"
 	S3_BUCKET_TF_CONFIGS = "tfc-configuration-files"
@@ -32,22 +28,6 @@ const (
 	VAR_CATEGORY_ENV     = "env"
 	VAR_CATEGORY_TF      = "terraform"
 )
-
-// SqsActions encapsulates the Amazon Simple Queue Service (Amazon SQS) actions
-type SqsActions struct {
-	SqsClient *sqs.Client
-}
-
-func newSqsActions() *SqsActions {
-	cfg, err := config.LoadDefaultConfig(context.TODO(),
-		config.WithRegion("ca-central-1"),
-	)
-	if err != nil {
-		log.Fatalf("unable to load SDK config, %v", err)
-	}
-
-	return &SqsActions{SqsClient: sqs.NewFromConfig(cfg)}
-}
 
 type S3Actions struct {
 	S3Client *s3.Client
@@ -115,59 +95,6 @@ func (actor DynamoDBActions) GetVariables(ctx context.Context, wsId string, tabl
 	return variables, nil
 }
 
-func (actor SqsActions) GetMessages(ctx context.Context, queueUrl string, maxMessages int32, waitTime int32) ([]types.Message, error) {
-	var messages []types.Message
-	result, err := actor.SqsClient.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
-		QueueUrl:            aws.String(queueUrl),
-		MaxNumberOfMessages: maxMessages,
-		WaitTimeSeconds:     waitTime,
-	})
-	if err != nil {
-		log.Printf("Couldn't get messages from queue %v. Here's why: %v\n", queueUrl, err)
-	} else {
-		messages = result.Messages
-	}
-	return messages, err
-}
-
-func (actor SqsActions) DeleteMessage(ctx context.Context, queueurl string, receipthandle string) {
-	defer timeTrack(time.Now(), "delete-sqs-message")
-	_, err := actor.SqsClient.DeleteMessage(ctx, &sqs.DeleteMessageInput{
-		QueueUrl:      aws.String(queueurl),
-		ReceiptHandle: &receipthandle,
-	})
-	if err != nil {
-		log.Printf("couldn't delete message from queue %v. here's why: %v\n", queueurl, err)
-	}
-}
-
-func switchTfVersion(version string, cache bool) {
-	defer timeTrack(time.Now(), "switchtfversion")
-	var cmd *exec.Cmd
-	if cache {
-		cmd = exec.Command("tfswitch", "-i", CACHE_MOUNPOINT+"/terraform", version)
-	} else {
-		cmd = exec.Command("tfswitch", version)
-	}
-	_, err := cmd.Output()
-
-	if err != nil {
-		log.Println("tfswitch. error:" + err.Error())
-	}
-}
-
-func listDir(path string) {
-	log.Printf("Listing content of dir=%v", path)
-	entries, err := os.ReadDir(path)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	for _, e := range entries {
-		log.Println(e.Name())
-	}
-}
-
 type RunInputMsg struct {
 	ConfigVersionId          string `json:"configVersionId"`
 	ConfigVersionS3ObjectKey string `json:"configVersionS3ObjectKey"`
@@ -189,7 +116,7 @@ func timeTrack(start time.Time, name string) {
 	log.Printf("%s took %d ms", name, elapsed.Milliseconds())
 }
 
-func processSqsMessage(msg types.Message) error {
+func processSqsMessage(msg Message) error {
 	defer timeTrack(time.Now(), "process-sqs-msg")
 	log.Printf("Processing message with ID=%v", *msg.MessageId)
 
@@ -215,44 +142,13 @@ func processSqsMessage(msg types.Message) error {
 	// Unzip terraform configuration
 	unzipTfConfigPackage(downloadFilePath)
 
-	// Set proper Terraform binary version
-	switchTfVersion("1.9.6", true)
-
 	// Set workspace variables
 	setWorkspaceVars(workspaceId)
-
-	// Init Terrfaform
-	workingDir, execPath := mustGetTFConfigDir(), TF_EXEC_PATH
-	tf, err := tfexec.NewTerraform(workingDir, execPath)
-	if err != nil {
-		log.Fatalf("error running NewTerraform: %s", err)
-	}
-
-	// Run terraform init
-	//tfInit()
-	mustRunTfInit(tf)
-
-	// Run terraform plan
-	//result, err := tf.Plan(context.Background())
-	//if err != nil {
-	//	log.Fatalf("Error running tf plan: %t\n", err)
-	//}
-
-	//fmt.Printf("TF plan result is:%b", result)
 
 	// Clean config files
 	cleanConfig()
 
 	return nil
-}
-
-func mustRunTfInit(tf *tfexec.Terraform) {
-	defer timeTrack(time.Now(), "terraform-init")
-	err := tf.Init(context.Background())
-	if err != nil {
-		log.Fatalf("Error running tf init: %t\n", err)
-	}
-	return
 }
 
 type Variable struct {
@@ -389,14 +285,28 @@ func (actor S3Actions) downloadTfConfig(objectKey string, bucketName string, fil
 	return err
 }
 
-var sqsActions = newSqsActions()
 var s3Actions = newS3Actions()
 
-func main() {
-	//listDir(CACHE_MOUNPOINT + "/terraform/.terraform.versions")
+// Declare variables
+var cfg aws.Config
+var sqsMessageProvider SqsMessageProvider
 
+// Configure providers
+func init() {
+	cfg := mustLoadAwsConfig(context.TODO())
+
+	sqsMessageProvider := newSqsMessageProvider(cfg)
+	sqsMessageProvider.WithMaxMessages(5)
+	sqsMessageProvider.WithWaitTime(10) // 10 seconds
+}
+
+func main() {
+	prerun_helper(sqsMessageProvider)
+}
+
+func prerun_helper(msg_p MessageProvider) {
 	for {
-		messages, _ := sqsActions.GetMessages(context.TODO(), QUEUE_URL, 5, 10)
+		messages, _ := msg_p.GetRunMessages(context.TODO())
 		if len(messages) > 0 {
 			log.Printf("Fetched %d messages from queue", len(messages))
 		}
@@ -405,7 +315,15 @@ func main() {
 			if err := processSqsMessage(msg); err != nil {
 				log.Printf("Error when processing sqs msg: %v", err.Error())
 			}
-			sqsActions.DeleteMessage(context.TODO(), QUEUE_URL, *msg.ReceiptHandle)
+			msg_p.DeleteMessage(context.TODO(), msg.ReceiptHandle)
 		}
 	}
+}
+
+func mustLoadAwsConfig(ctx context.Context) aws.Config {
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		log.Fatalf("Unable to load SDK config, %v", err)
+	}
+	return cfg
 }
