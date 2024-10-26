@@ -2,12 +2,9 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -16,33 +13,18 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 const (
-	CACHE_MOUNPOINT      = "/opt/tfc-cache"
-	TF_EXEC_PATH         = "/home/app/.bin/terraform"
-	S3_BUCKET_TF_CONFIGS = "tfc-configuration-files"
-	TF_CONFIG_DIRNAME    = "/tf-config"
-	VARIABLES_TABLE      = "vars"
-	VAR_CATEGORY_ENV     = "env"
-	VAR_CATEGORY_TF      = "terraform"
+	S3_BUCKET_TF_CONFIGS   string = "tfc-configuration-files"
+	TF_CONFIG_REL_DIR_PATH string = "/tf-config"
+
+	CACHE_MOUNPOINT  = "/opt/tfc-cache"
+	TF_EXEC_PATH     = "/home/app/.bin/terraform"
+	VARIABLES_TABLE  = "vars"
+	VAR_CATEGORY_ENV = "env"
+	VAR_CATEGORY_TF  = "terraform"
 )
-
-type S3Actions struct {
-	S3Client *s3.Client
-}
-
-func newS3Actions() *S3Actions {
-	cfg, err := config.LoadDefaultConfig(context.TODO(),
-		config.WithRegion("ca-central-1"),
-	)
-	if err != nil {
-		log.Fatalf("unable to load SDK config, %v", err)
-	}
-
-	return &S3Actions{S3Client: s3.NewFromConfig(cfg)}
-}
 
 type DynamoDBActions struct {
 	DymamoDBClient *dynamodb.Client
@@ -95,58 +77,14 @@ func (actor DynamoDBActions) GetVariables(ctx context.Context, wsId string, tabl
 	return variables, nil
 }
 
-type RunInputMsg struct {
-	ConfigVersionId          string `json:"configVersionId"`
-	ConfigVersionS3ObjectKey string `json:"configVersionS3ObjectKey"`
-	WorkspaceId              string `json:"workspaceId"`
-}
-
-func unmarshalRunInputMsg(payload string) (RunInputMsg, error) {
-	defer timeTrack(time.Now(), "unmarshal-msg-payload")
-	var runInputMsg RunInputMsg
-	err := json.Unmarshal([]byte(payload), &runInputMsg)
-	if err != nil {
-		panic(err)
-	}
-	return runInputMsg, nil
-}
-
 func timeTrack(start time.Time, name string) {
 	elapsed := time.Since(start)
 	log.Printf("%s took %d ms", name, elapsed.Milliseconds())
 }
 
-func processSqsMessage(msg Message) error {
+func processSqsMessage(msg RunMessage) error {
 	defer timeTrack(time.Now(), "process-sqs-msg")
 	log.Printf("Processing message with ID=%v", *msg.MessageId)
-
-	// Unmarshall SQS message JSON payload
-	runInputMsg, err := unmarshalRunInputMsg(*msg.Body)
-	if err != nil {
-		return err
-	}
-	configVersionId := runInputMsg.ConfigVersionId
-	configVersionS3ObjectKey := runInputMsg.ConfigVersionS3ObjectKey
-	workspaceId := runInputMsg.WorkspaceId
-
-	log.Printf(
-		"configVersionId=%v, configVersionS3ObjectKey=%v",
-		configVersionId,
-		configVersionS3ObjectKey,
-	)
-
-	// Fetch configuration version package
-	downloadFilePath := getTfConfigDownloadFilePath(configVersionS3ObjectKey)
-	err = s3Actions.downloadTfConfig(configVersionS3ObjectKey, S3_BUCKET_TF_CONFIGS, downloadFilePath)
-
-	// Unzip terraform configuration
-	unzipTfConfigPackage(downloadFilePath)
-
-	// Set workspace variables
-	setWorkspaceVars(workspaceId)
-
-	// Clean config files
-	cleanConfig()
 
 	return nil
 }
@@ -192,104 +130,10 @@ func setWorkspaceVars(wsId string) {
 	return
 }
 
-func cleanConfig() {
-	defer timeTrack(time.Now(), "cleanConfig")
-	dirname, err := os.UserHomeDir()
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = os.RemoveAll(filepath.Join(dirname, TF_CONFIG_DIRNAME))
-	if err != nil {
-		log.Println("Error while deleting all files of tf config: " + err.Error())
-	}
-}
-
-func mustGetTFConfigDir() string {
-	dirname, err := os.UserHomeDir()
-	if err != nil {
-		log.Fatal(err)
-	}
-	return filepath.Join(dirname, TF_CONFIG_DIRNAME)
-}
-
-func tfInit() {
-	defer timeTrack(time.Now(), "tf-init")
-
-	dirname, err := os.UserHomeDir()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	cmd := exec.Command("terraform", "init", "-no-color")
-	cmd.Dir = filepath.Join(dirname, TF_CONFIG_DIRNAME)
-	stdout, err := cmd.Output()
-
-	if err != nil {
-		log.Println("Error while applying terraform init: " + err.Error())
-	}
-	// Print the output
-	log.Println("Ouput of tf init: " + string(stdout))
-}
-
-func unzipTfConfigPackage(filepath string) {
-	defer timeTrack(time.Now(), "unzip-tf-config")
-
-	// create target directory if not existing
-	dirname, err := os.UserHomeDir()
-	if err != nil {
-		log.Fatal(err)
-	}
-	tfConfigDir := dirname + TF_CONFIG_DIRNAME
-	_ = os.Mkdir(tfConfigDir, 0755)
-
-	cmd := exec.Command("tar", "-xf", filepath, "--strip-components=1", "-C", tfConfigDir)
-	_, err = cmd.Output()
-
-	if err != nil {
-		log.Println("Error while unzipping tf config package: " + err.Error())
-	}
-}
-
-func getTfConfigDownloadFilePath(s3ObjectKey string) string {
-	dirname, err := os.UserHomeDir()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return filepath.Join(dirname, s3ObjectKey)
-}
-
-func (actor S3Actions) downloadTfConfig(objectKey string, bucketName string, fileName string) error {
-	defer timeTrack(time.Now(), "downloadTfConfig")
-
-	result, err := actor.S3Client.GetObject(context.TODO(), &s3.GetObjectInput{
-		Bucket: aws.String(bucketName),
-		Key:    aws.String(objectKey),
-	})
-	if err != nil {
-		log.Printf("Couldn't get object %v:%v. Here's why: %v\n", bucketName, objectKey, err)
-		return err
-	}
-	defer result.Body.Close()
-	file, err := os.Create(fileName)
-	if err != nil {
-		log.Printf("Couldn't create file %v. Here's why: %v\n", fileName, err)
-		return err
-	}
-	defer file.Close()
-	body, err := io.ReadAll(result.Body)
-	if err != nil {
-		log.Printf("Couldn't read object body from %v. Here's why: %v\n", objectKey, err)
-	}
-	_, err = file.Write(body)
-	return err
-}
-
-var s3Actions = newS3Actions()
-
 // Declare variables
 var cfg aws.Config
 var sqsMessageProvider SqsMessageProvider
+var s3TfConfigProvider S3TfConfigProvider
 
 // Configure providers
 func init() {
@@ -298,6 +142,9 @@ func init() {
 	sqsMessageProvider := newSqsMessageProvider(cfg)
 	sqsMessageProvider.WithMaxMessages(5)
 	sqsMessageProvider.WithWaitTime(10) // 10 seconds
+
+	s3TfConfigProvider := newS3TfConfigProvider(cfg)
+	_ = s3TfConfigProvider
 }
 
 func main() {
@@ -306,7 +153,9 @@ func main() {
 
 func prerun_helper(msg_p MessageProvider) {
 	for {
-		messages, _ := msg_p.GetRunMessages(context.TODO())
+		messages, err := msg_p.GetRunMessages(context.TODO())
+		if err != nil {
+		}
 		if len(messages) > 0 {
 			log.Printf("Fetched %d messages from queue", len(messages))
 		}
@@ -326,4 +175,13 @@ func mustLoadAwsConfig(ctx context.Context) aws.Config {
 		log.Fatalf("Unable to load SDK config, %v", err)
 	}
 	return cfg
+}
+
+// Returns directory where the TF config is made available
+func getTfConfigInstallPath() (dirPath string, err error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatalf("Unable to get user home directory, %v", err)
+	}
+	return filepath.Join(homeDir, TF_CONFIG_REL_DIR_PATH), nil
 }

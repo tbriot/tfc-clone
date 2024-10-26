@@ -9,7 +9,7 @@ all : pre-run-helper
 SHELL=/bin/bash
 
 pre-run-helper : main.go
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o pre-run-helper main.go
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o pre-run-helper .
 
 dist : pre-run-helper
 	docker build --tag tbriot/${DOCKER_IMAGE_NAME}:latest .

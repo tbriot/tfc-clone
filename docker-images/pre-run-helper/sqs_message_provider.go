@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -21,7 +22,9 @@ type SqsMessageProvider struct {
 	waitTime    int32 // in seconds
 }
 
+// ------------------------------------------------------------------------------
 // Constructor
+// ------------------------------------------------------------------------------
 func newSqsMessageProvider(cfg aws.Config) *SqsMessageProvider {
 	queueUrl := QUEUE_URL // create addressable variable from unadressable constant
 	return &SqsMessageProvider{
@@ -32,7 +35,9 @@ func newSqsMessageProvider(cfg aws.Config) *SqsMessageProvider {
 	}
 }
 
+// ------------------------------------------------------------------------------
 // Setters
+// ------------------------------------------------------------------------------
 func (p SqsMessageProvider) WithMaxMessages(no_msg int32) {
 	p.maxMessages = no_msg
 }
@@ -41,8 +46,10 @@ func (p SqsMessageProvider) WithWaitTime(time int32) {
 	p.waitTime = time
 }
 
-// Implementing the MessageProvider interface
-func (p SqsMessageProvider) GetRunMessages(ctx context.Context) ([]Message, error) {
+// ------------------------------------------------------------------------------
+// Implement the MessageProvider interface
+// ------------------------------------------------------------------------------
+func (p SqsMessageProvider) GetRunMessages(ctx context.Context) ([]RunMessage, error) {
 	var messages []types.Message
 	result, err := p.sqsClient.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
 		QueueUrl:            aws.String(*p.queueUrl),
@@ -55,7 +62,7 @@ func (p SqsMessageProvider) GetRunMessages(ctx context.Context) ([]Message, erro
 		messages = result.Messages
 	}
 
-	return mapSqsMessages(messages), err
+	return mapSqsMessages(messages)
 }
 
 func (p SqsMessageProvider) DeleteMessage(ctx context.Context, receipthandle *string) error {
@@ -70,16 +77,35 @@ func (p SqsMessageProvider) DeleteMessage(ctx context.Context, receipthandle *st
 	return nil
 }
 
-// Utility function that Converts SQS messages into abstracted messages type
-func mapSqsMessages(sqsMsgs []types.Message) []Message {
-	var msgs []Message
+// ------------------------------------------------------------------------------
+// Utility functions
+// ------------------------------------------------------------------------------
+// Converts SQS messages into abstracted messages type
+func mapSqsMessages(sqsMsgs []types.Message) ([]RunMessage, error) {
+	var msgs []RunMessage
 	for _, m := range sqsMsgs {
-		msgs = append(msgs, Message{
+		unmarshalledBody, err := unmarshalRunMessage(*m.Body)
+		if err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, RunMessage{
 			MessageId:     m.MessageId,
-			Body:          m.Body,
+			Body:          unmarshalledBody,
 			ReceiptHandle: m.ReceiptHandle,
 			Attributes:    m.Attributes,
 		})
 	}
-	return msgs
+	return msgs, nil
+}
+
+// Parse json document in run message payload
+func unmarshalRunMessage(payload string) (*RunMessageBody, error) {
+	defer timeTrack(time.Now(), "unmarshal-run-msg-payload")
+	var msg RunMessageBody
+	err := json.Unmarshal([]byte(payload), &msg)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't unmarshal json payload of run message: %w\n",
+			err)
+	}
+	return &msg, nil
 }
