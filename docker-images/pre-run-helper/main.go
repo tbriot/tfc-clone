@@ -120,9 +120,14 @@ func prerun_helper(msgProvider MessageProvider, configProvider TfConfigProvider,
 		configProvider.DownloadTfConfig(context.TODO(), msg.Body.ConfigVersionId, tfConfigInstallPath)
 
 		// Get TFC Workspace Vars
+		workspaceVariables, err := wsVarsManager.ListWorkspaceVariables(msg.Body.WorkspaceId)
+		if err != nil {
+			log.Fatalf("Could not retrieve workspace variables, workspace-id=%v: %v", msg.Body.WorkspaceId, err)
+		}
+		_ = workspaceVariables
+
 		// Build list of env vars from ws vars
 		// Write .env file
-		_ = wsVarsManager
 
 		msgProvider.DeleteMessage(context.TODO(), msg.ReceiptHandle)
 	}
