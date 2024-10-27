@@ -10,72 +10,17 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
-	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 )
 
 const (
-	S3_BUCKET_TF_CONFIGS   string = "tfc-configuration-files"
-	TF_CONFIG_REL_DIR_PATH string = "/tf-config"
+	S3_BUCKET_TF_CONFIGS           string = "tfc-configuration-files"
+	TF_CONFIG_REL_DIR_PATH         string = "/tf-config"
+	RUN_MESSAGE_PROVIDER_WAIT_TIME int32  = 5 // in seconds
 
 	CACHE_MOUNPOINT  = "/opt/tfc-cache"
-	TF_EXEC_PATH     = "/home/app/.bin/terraform"
-	VARIABLES_TABLE  = "vars"
 	VAR_CATEGORY_ENV = "env"
 	VAR_CATEGORY_TF  = "terraform"
 )
-
-type DynamoDBActions struct {
-	DymamoDBClient *dynamodb.Client
-}
-
-func newDynamoDBActions() *DynamoDBActions {
-	cfg, err := config.LoadDefaultConfig(context.TODO(),
-		config.WithRegion("ca-central-1"),
-	)
-	if err != nil {
-		log.Fatalf("unable to load SDK config, %v", err)
-	}
-
-	return &DynamoDBActions{DymamoDBClient: dynamodb.NewFromConfig(cfg)}
-}
-
-func (actor DynamoDBActions) GetVariables(ctx context.Context, wsId string, table string) ([]Variable, error) {
-	defer timeTrack(time.Now(), "query-variables-dynamodb")
-	var (
-		err       error
-		variables []Variable
-		response  *dynamodb.QueryOutput
-	)
-	keyEx := expression.Key("workspace-id").Equal(expression.Value(wsId))
-	expr, err := expression.NewBuilder().WithKeyCondition(keyEx).Build()
-	if err != nil {
-		return nil, fmt.Errorf("Couldn't build expression to query variables from DynamoDB: %w\n", err)
-	} else {
-		queryPaginator := dynamodb.NewQueryPaginator(actor.DymamoDBClient, &dynamodb.QueryInput{
-			TableName:                 aws.String(table),
-			ExpressionAttributeNames:  expr.Names(),
-			ExpressionAttributeValues: expr.Values(),
-			KeyConditionExpression:    expr.KeyCondition(),
-		})
-		for queryPaginator.HasMorePages() {
-			response, err = queryPaginator.NextPage(ctx)
-			if err != nil {
-				return nil, fmt.Errorf("Couldn't query variables for workspaceId=%s: %w\n", wsId, err)
-			} else {
-				var variablePage []Variable
-				err = attributevalue.UnmarshalListOfMaps(response.Items, &variablePage)
-				if err != nil {
-					return nil, fmt.Errorf("Couldn't unmarshal query response for workspaceId=%s: %w\n", wsId, err)
-				} else {
-					variables = append(variables, variablePage...)
-				}
-			}
-		}
-	}
-	return variables, nil
-}
 
 func timeTrack(start time.Time, name string) {
 	elapsed := time.Since(start)
@@ -89,83 +34,97 @@ func processSqsMessage(msg RunMessage) error {
 	return nil
 }
 
-type Variable struct {
-	Id          string             `dynamodbav:"id"`
-	WorkspaceId string             `dynamodbav:"workspace-id"`
-	VarType     string             `dynamodbav:"type"`
-	Attributes  VariableAttributes `dynamodbav:"attributes"`
-}
-
-type VariableAttributes struct {
-	Key       string `dynamodbav:"key"`
-	Value     string `dynamodbav:"value"`
-	Category  string `dynamodbav:"category"`
-	Sensitive bool   `dynamodbav:"sensitive"`
-}
-
-func setWorkspaceVars(wsId string) {
-	defer timeTrack(time.Now(), "set-workspace-id")
-	// get workspace variables
-	dynamoDBActions := *newDynamoDBActions()
-	vars, err := dynamoDBActions.GetVariables(context.TODO(), wsId, VARIABLES_TABLE)
-	if err != nil {
-		fmt.Printf("Could not retrieve variables from DynamoDB: %s\n", err.Error())
-		return
-	}
-
-	fmt.Printf("Retrieved %d variables from DynamoDB\n", len(vars))
-
-	// set environment variables
-	for _, v := range vars {
-		switch v.Attributes.Category {
-		case VAR_CATEGORY_ENV:
-			os.Setenv(v.Attributes.Key, v.Attributes.Value)
-		case VAR_CATEGORY_TF:
-			os.Setenv("TF_VAR_"+v.Attributes.Key, v.Attributes.Value)
-		default:
-			fmt.Printf("Unexpected variable category='%v'.", v.Attributes.Category)
-		}
-	}
-
-	return
-}
+//func setWorkspaceVars(wsId string) {
+//	defer timeTrack(time.Now(), "set-workspace-id")
+//	// get workspace variables
+//	dynamoDBActions := *newDynamoDBActions()
+//	vars, err := dynamoDBActions.GetVariables(context.TODO(), wsId, VARIABLES_TABLE)
+//	if err != nil {
+//		fmt.Printf("Could not retrieve variables from DynamoDB: %s\n", err.Error())
+//		return
+//	}
+//
+//	fmt.Printf("Retrieved %d variables from DynamoDB\n", len(vars))
+//
+//	// set environment variables
+//	for _, v := range vars {
+//		switch v.Attributes.Category {
+//		case VAR_CATEGORY_ENV:
+//			os.Setenv(v.Attributes.Key, v.Attributes.Value)
+//		case VAR_CATEGORY_TF:
+//			os.Setenv("TF_VAR_"+v.Attributes.Key, v.Attributes.Value)
+//		default:
+//			fmt.Printf("Unexpected variable category='%v'.", v.Attributes.Category)
+//		}
+//	}
+//
+//	return
+//}
 
 // Declare variables
 var cfg aws.Config
-var sqsMessageProvider SqsMessageProvider
-var s3TfConfigProvider S3TfConfigProvider
+var sqsMessageProvider *SqsMessageProvider
+var s3TfConfigProvider *S3TfConfigProvider
+var tfcWorkspaceVariablesClient *TfcWorkspaceVariablesClient
 
 // Configure providers
 func init() {
 	cfg := mustLoadAwsConfig(context.TODO())
 
+	// Run message provider
 	sqsMessageProvider := newSqsMessageProvider(cfg)
-	sqsMessageProvider.WithMaxMessages(5)
-	sqsMessageProvider.WithWaitTime(10) // 10 seconds
+	sqsMessageProvider.WithMaxMessages(1) //  retrieve only one message
+	sqsMessageProvider.WithWaitTime(RUN_MESSAGE_PROVIDER_WAIT_TIME)
 
+	// Terraform configuration provider
 	s3TfConfigProvider := newS3TfConfigProvider(cfg)
 	_ = s3TfConfigProvider
+
+	// Workspace provider
+	tfcWorkspaceVariablesClient := newTfcWorkspaceVariablesClient(cfg)
+	_ = tfcWorkspaceVariablesClient
 }
 
 func main() {
-	prerun_helper(sqsMessageProvider)
+	// Inject dependencies
+	prerun_helper(*sqsMessageProvider, *s3TfConfigProvider, *tfcWorkspaceVariablesClient)
 }
 
-func prerun_helper(msg_p MessageProvider) {
+func prerun_helper(msgProvider MessageProvider, configProvider TfConfigProvider, wsVarsManager TfcWorkspaceVariablesManager) {
+	tfConfigInstallPath := mustGetTfConfigInstallPath()
+
 	for {
-		messages, err := msg_p.GetRunMessages(context.TODO())
+		messages, err := msgProvider.GetRunMessages(context.TODO())
 		if err != nil {
-		}
-		if len(messages) > 0 {
-			log.Printf("Fetched %d messages from queue", len(messages))
+			// If critial then panic
+			// else continue
 		}
 
-		for _, msg := range messages {
-			if err := processSqsMessage(msg); err != nil {
-				log.Printf("Error when processing sqs msg: %v", err.Error())
-			}
-			msg_p.DeleteMessage(context.TODO(), msg.ReceiptHandle)
+		switch len(messages) {
+		case 0:
+			fmt.Printf("No run message received after %d wait. Continuing to poll...\n", RUN_MESSAGE_PROVIDER_WAIT_TIME)
+		case 1:
+			fmt.Println("Received one run message.")
+		default:
+			log.Fatalf("Fetched %d messages from queue while expecting only one.", len(messages))
 		}
+
+		// Only one message is consumed by the prerun_helper
+		msg := messages[0]
+		log.Printf("Message information: ID=%v, workspace-id=%v, configuration-version-id=%v.",
+			*msg.MessageId,
+			msg.Body.WorkspaceId,
+			msg.Body.ConfigVersionId)
+
+		// Download and extract TF config
+		configProvider.DownloadTfConfig(context.TODO(), msg.Body.ConfigVersionId, tfConfigInstallPath)
+
+		// Get TFC Workspace Vars
+		// Build list of env vars from ws vars
+		// Write .env file
+		_ = wsVarsManager
+
+		msgProvider.DeleteMessage(context.TODO(), msg.ReceiptHandle)
 	}
 }
 
@@ -178,10 +137,10 @@ func mustLoadAwsConfig(ctx context.Context) aws.Config {
 }
 
 // Returns directory where the TF config is made available
-func getTfConfigInstallPath() (dirPath string, err error) {
+func mustGetTfConfigInstallPath() (dirPath string) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		log.Fatalf("Unable to get user home directory, %v", err)
 	}
-	return filepath.Join(homeDir, TF_CONFIG_REL_DIR_PATH), nil
+	return filepath.Join(homeDir, TF_CONFIG_REL_DIR_PATH)
 }
