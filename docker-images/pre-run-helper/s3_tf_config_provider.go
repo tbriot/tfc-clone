@@ -36,12 +36,12 @@ func newS3TfConfigProvider(cfg aws.Config) *S3TfConfigProvider {
 }
 
 // Setters
-func (p S3TfConfigProvider) WithS3BucketName(bucketName string) {
+func (p *S3TfConfigProvider) WithS3BucketName(bucketName string) {
 	p.bucketName = bucketName
 }
 
 // Implementing the TfConfigProvider interface
-func (p S3TfConfigProvider) DownloadTfConfig(ctx context.Context, versionId string, path string) error {
+func (p *S3TfConfigProvider) DownloadTfConfig(ctx context.Context, versionId string, path string) error {
 	defer timeTrack(time.Now(), "download-tf-config")
 
 	// Download S3 object

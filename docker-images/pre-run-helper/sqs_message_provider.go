@@ -38,18 +38,19 @@ func newSqsMessageProvider(cfg aws.Config) *SqsMessageProvider {
 // ------------------------------------------------------------------------------
 // Setters
 // ------------------------------------------------------------------------------
-func (p SqsMessageProvider) WithMaxMessages(no_msg int32) {
+func (p *SqsMessageProvider) WithMaxMessages(no_msg int32) {
 	p.maxMessages = no_msg
 }
 
-func (p SqsMessageProvider) WithWaitTime(time int32) {
+func (p *SqsMessageProvider) WithWaitTime(time int32) {
 	p.waitTime = time
 }
 
 // ------------------------------------------------------------------------------
 // Implement the MessageProvider interface
 // ------------------------------------------------------------------------------
-func (p SqsMessageProvider) GetRunMessages(ctx context.Context) ([]RunMessage, error) {
+func (p *SqsMessageProvider) GetRunMessages(ctx context.Context) ([]RunMessage, error) {
+	defer timeTrack(time.Now(), "get-run-messages-from-sqs")
 	var messages []types.Message
 	result, err := p.sqsClient.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
 		QueueUrl:            aws.String(*p.queueUrl),
@@ -65,7 +66,7 @@ func (p SqsMessageProvider) GetRunMessages(ctx context.Context) ([]RunMessage, e
 	return mapSqsMessages(messages)
 }
 
-func (p SqsMessageProvider) DeleteMessage(ctx context.Context, receipthandle *string) error {
+func (p *SqsMessageProvider) DeleteMessage(ctx context.Context, receipthandle *string) error {
 	defer timeTrack(time.Now(), "delete-sqs-message")
 	_, err := p.sqsClient.DeleteMessage(ctx, &sqs.DeleteMessageInput{
 		QueueUrl:      aws.String(*p.queueUrl),

@@ -49,7 +49,7 @@ func newTfcWorkspaceVariablesClient(cfg aws.Config) *TfcWorkspaceVariablesClient
 // --------------------------------------------------------------------------------
 // Implement TfcWorkspaceVariablesManager interface
 // --------------------------------------------------------------------------------
-func (c TfcWorkspaceVariablesClient) ListWorkspaceVariables(wsId string) (*[]WorkspaceVariable, error) {
+func (c *TfcWorkspaceVariablesClient) ListWorkspaceVariables(wsId string) (*[]WorkspaceVariable, error) {
 	defer timeTrack(time.Now(), "list-workspace-variables")
 	var (
 		err               error
