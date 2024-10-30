@@ -40,7 +40,7 @@ func main() {
 	// Workspace provider
 	tfcWorkspaceVariablesClient := newTfcWorkspaceVariablesClient(cfg)
 	// Inject dependencies
-	prerun_helper(*sqsMessageProvider, *s3TfConfigProvider, *tfcWorkspaceVariablesClient)
+	prerun_helper(sqsMessageProvider, s3TfConfigProvider, tfcWorkspaceVariablesClient)
 }
 
 func prerun_helper(msgProvider MessageProvider, configProvider TfConfigProvider, wsVarsManager TfcWorkspaceVariablesManager) {
