@@ -72,10 +72,15 @@ func prerun_helper(msgProvider MessageProvider, configProvider TfConfigProvider,
 			msg.Body.ConfigVersionId)
 
 		// Download and extract TF config
-		configProvider.DownloadTfConfig(
+		err = configProvider.DownloadTfConfig(
 			context.TODO(),
-			msg.Body.ConfigVersionId,
+			// Passing an S3 object key, but should instead really pass a key id
+			// to abstract the s3 technical implementation
+			msg.Body.ConfigVersionS3ObjectKey,
 			SHARED_VOLUME_MOUNT_PATH+TF_CONFIG_REL_DIR_PATH)
+		if err != nil {
+			log.Fatalf("Could not download tf config version id=%v: %v", msg.Body.ConfigVersionId, err)
+		}
 
 		// Get TFC Workspace Vars
 		workspaceVariables, err := wsVarsManager.ListWorkspaceVariables(msg.Body.WorkspaceId)

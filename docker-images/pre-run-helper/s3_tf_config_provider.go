@@ -81,6 +81,7 @@ func (p *S3TfConfigProvider) DownloadTfConfig(ctx context.Context, versionId str
 func unzipFile(filepath string, path string) error {
 	defer timeTrack(time.Now(), "unzip-tf-config")
 
+	// TODO: create target dir if it does not exist
 	cmd := exec.Command("tar", "-xf", filepath, "--strip-components=1", "-C", path)
 	if _, err := cmd.Output(); err != nil {
 		return fmt.Errorf("error while unzipping tf config package, filepath=%v, ouput_path=%v: %w",

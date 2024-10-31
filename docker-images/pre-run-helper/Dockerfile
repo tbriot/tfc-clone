@@ -9,6 +9,13 @@ COPY pre-run-helper ./
 
 # Setup an app user so the container doesn't run as the root user
 RUN useradd -m app
+
+# Creating directories where docker volumes will be mounted
+# in this Dockerfile so that unix permissions can be set as expected.
+# Otherwise those directories are owned by root.
+RUN mkdir -p /opt/shared-volume
+RUN chown -R app:app /opt/shared-volume
+
 USER app
 
 CMD ["./pre-run-helper"]
