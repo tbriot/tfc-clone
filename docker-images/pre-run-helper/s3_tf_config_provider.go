@@ -84,7 +84,7 @@ func unzipFile(filepath string, path string) error {
 	// Create target dir if it does not exist
 	err := os.MkdirAll(path, 0755)
 	if err != nil {
-		return fmt.Errorf("error while creating directory=%v: %w", filepath, err)
+		return fmt.Errorf("error while creating directory=%v: %w", path, err)
 	}
 
 	// untar terraform config zip file

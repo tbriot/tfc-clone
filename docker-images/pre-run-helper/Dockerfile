@@ -15,7 +15,6 @@ RUN useradd -m app
 # Otherwise those directories are owned by root.
 RUN mkdir -p /opt/shared-volume
 RUN chown -R app:app /opt/shared-volume
-
 USER app
-
+VOLUME ["/opt/shared-volume"]
 CMD ["./pre-run-helper"]
