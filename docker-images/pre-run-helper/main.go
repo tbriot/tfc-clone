@@ -139,7 +139,7 @@ func mustWriteVarsToDotenvFile(vars map[string]string, filepath string) {
 		dotenvString += fmt.Sprintf("%v=%v\n", k, v)
 	}
 	// only the owner of the file can read it
-	err := os.WriteFile(filepath, []byte(dotenvString), 0400)
+	err := os.WriteFile(filepath, []byte(dotenvString), 0644)
 	if err != nil {
 		log.Fatalf("Could not write env variables to file: %v.\n", err)
 	}

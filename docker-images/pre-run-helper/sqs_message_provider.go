@@ -50,7 +50,7 @@ func (p *SqsMessageProvider) WithWaitTime(time int32) {
 // Implement the MessageProvider interface
 // ------------------------------------------------------------------------------
 func (p *SqsMessageProvider) GetRunMessages(ctx context.Context) ([]RunMessage, error) {
-	defer timeTrack(time.Now(), "get-run-messages-from-sqs")
+	//defer timeTrack(time.Now(), "get-run-messages-from-sqs")
 	var messages []types.Message
 	result, err := p.sqsClient.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
 		QueueUrl:            aws.String(*p.queueUrl),
