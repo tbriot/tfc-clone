@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -12,10 +13,13 @@ import (
 )
 
 const (
-	CACHE_MOUNPOINT   = "/opt/tfc-cache"
-	TF_EXEC_PATH      = "/home/app/.bin/terraform"
-	TF_CONFIG_DIRNAME = "/tf-config"
-	VARIABLES_TABLE   = "vars"
+	TF_EXEC_PATH    = "/home/app/.bin/terraform"
+	CACHE_MOUNPOINT = "/opt/tfc-cache"
+
+	// Define where terraform config and dotenv file are written on the disk
+	SHARED_VOLUME_MOUNT_PATH string = "/opt/shared-volume"
+	TF_CONFIG_REL_DIR_PATH   string = "/tfconfig"
+	DOTENV_REL_FILE_PATH     string = "/.env"
 )
 
 func switchTfVersion(version string, cache bool) {
@@ -31,6 +35,61 @@ func switchTfVersion(version string, cache bool) {
 	if err != nil {
 		log.Println("tfswitch. error:" + err.Error())
 	}
+}
+
+func mustRunTfInit(tf *tfexec.Terraform) {
+	defer timeTrack(time.Now(), "terraform-init")
+	err := tf.Init(context.Background())
+	if err != nil {
+		log.Fatalf("Error running tf init: %t\n", err)
+	}
+	return
+}
+
+func tfInit() {
+	defer timeTrack(time.Now(), "tf-init")
+
+	dirname, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	cmd := exec.Command("terraform", "init", "-no-color")
+	cmd.Dir = filepath.Join(dirname, SHARED_VOLUME_MOUNT_PATH+TF_CONFIG_REL_DIR_PATH)
+	stdout, err := cmd.Output()
+
+	if err != nil {
+		log.Println("Error while applying terraform init: " + err.Error())
+	}
+	// Print the output
+	log.Println("Ouput of tf init: " + string(stdout))
+}
+
+func main() {
+	// Install right version of tf cli
+	version, err := installTfCLI()
+	if err != nil {
+	}
+	fmt.Printf("Terraform CLI version=%v installed successfully.", version)
+
+	// Load workspace variables
+	if err := loadVariables(); err != nil {
+	}
+	fmt.Println("Workspace variables loaded successfully.")
+
+	// terraform init
+	// terraform plan
+}
+
+// Load environment variables from dotfile
+func loadVariables() error {
+	// TODO: load env vars from dotfile
+	return nil
+}
+
+func installTfCLI() (version string, err error) {
+	// Install proper tf CLI versions
+	return "", nil
 }
 
 func listDir(path string) {
@@ -50,76 +109,14 @@ func timeTrack(start time.Time, name string) {
 	log.Printf("%s took %d ms", name, elapsed.Milliseconds())
 }
 
-func mustRunTfInit(tf *tfexec.Terraform) {
-	defer timeTrack(time.Now(), "terraform-init")
-	err := tf.Init(context.Background())
-	if err != nil {
-		log.Fatalf("Error running tf init: %t\n", err)
-	}
-	return
-}
-
 func cleanConfig() {
 	defer timeTrack(time.Now(), "cleanConfig")
 	dirname, err := os.UserHomeDir()
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = os.RemoveAll(filepath.Join(dirname, TF_CONFIG_DIRNAME))
+	err = os.RemoveAll(filepath.Join(dirname, SHARED_VOLUME_MOUNT_PATH+TF_CONFIG_REL_DIR_PATH))
 	if err != nil {
 		log.Println("Error while deleting all files of tf config: " + err.Error())
-	}
-}
-
-func mustGetTFConfigDir() string {
-	dirname, err := os.UserHomeDir()
-	if err != nil {
-		log.Fatal(err)
-	}
-	return filepath.Join(dirname, TF_CONFIG_DIRNAME)
-}
-
-func tfInit() {
-	defer timeTrack(time.Now(), "tf-init")
-
-	dirname, err := os.UserHomeDir()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	cmd := exec.Command("terraform", "init", "-no-color")
-	cmd.Dir = filepath.Join(dirname, TF_CONFIG_DIRNAME)
-	stdout, err := cmd.Output()
-
-	if err != nil {
-		log.Println("Error while applying terraform init: " + err.Error())
-	}
-	// Print the output
-	log.Println("Ouput of tf init: " + string(stdout))
-}
-
-func unzipTfConfigPackage(filepath string) {
-	defer timeTrack(time.Now(), "unzip-tf-config")
-
-	// create target directory if not existing
-	dirname, err := os.UserHomeDir()
-	if err != nil {
-		log.Fatal(err)
-	}
-	tfConfigDir := dirname + TF_CONFIG_DIRNAME
-	_ = os.Mkdir(tfConfigDir, 0755)
-
-	cmd := exec.Command("tar", "-xf", filepath, "--strip-components=1", "-C", tfConfigDir)
-	_, err = cmd.Output()
-
-	if err != nil {
-		log.Println("Error while unzipping tf config package: " + err.Error())
-	}
-}
-
-func main() {
-	//listDir(CACHE_MOUNPOINT + "/terraform/.terraform.versions")
-
-	for {
 	}
 }
