@@ -1,4 +1,4 @@
-module github.com/tbriot/tfc-clone/process-run-events
+module github.com/tbriot/tfc-clone/run-executor
 
 go 1.23.2
 

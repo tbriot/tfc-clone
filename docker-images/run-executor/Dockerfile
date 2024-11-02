@@ -5,7 +5,7 @@ WORKDIR /usr/local/app
 RUN apt update
 RUN apt install -y curl
 
-COPY run-event-handler ./
+COPY run-executor ./
 
 # Setup an app user so the container doesn't run as the root user
 RUN useradd -m app
@@ -19,4 +19,4 @@ COPY .tfswitch.toml $HOME
 ENV PATH="$PATH:$HOME/.bin"
 
 WORKDIR /usr/local/app
-CMD ["./run-event-handler"]
+CMD ["./run-executor"]

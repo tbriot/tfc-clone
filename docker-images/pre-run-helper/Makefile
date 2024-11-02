@@ -6,7 +6,7 @@ SQS_QUEUE_URL = https://sqs.ca-central-1.amazonaws.com/253789223556/tfc-run-even
 WATCHED_SOURCES = $(wildcard *.go)
 
 all : pre-run-helper
-.PHONY : all dist install clean publish-msgs
+.PHONY : all dist install clean publish-msgs test-local
 
 SHELL=/bin/bash
 
