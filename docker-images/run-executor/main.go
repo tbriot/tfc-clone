@@ -57,7 +57,7 @@ func main() {
 	tfConfigPath := SHARED_VOLUME_MOUNT_PATH + TF_CONFIG_REL_DIR_PATH
 
 	// Install right version of tf cli
-	tf, err := installTfCLI(tfConfigPath, true, DEFAULT_TF_CLI_VERSION)
+	tf, err := installTfCLI(tfConfigPath, false, DEFAULT_TF_CLI_VERSION)
 	if err != nil {
 		panic(err)
 	}
@@ -66,7 +66,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("could not get terraform binary version info: %v", err)
 	}
-	fmt.Printf("Terraform CLI version is %v", tfVersion.String())
+	fmt.Printf("Terraform CLI version is %v.\n", tfVersion.String())
 	_ = providerVersions
 
 	// Load workspace variables
@@ -90,12 +90,14 @@ func installTfCLI(path string, cache bool, defaultVer string) (*tfexec.Terraform
 	var cmd *exec.Cmd
 	args := []string{"--default", defaultVer, "--chdir", path}
 	if cache {
-		args = append(args, "-install", CACHE_MOUNPOINT+"/terraform")
+		args = append(args, "--install", CACHE_MOUNPOINT+"/terraform")
 	}
 
 	cmd = exec.Command("tfswitch", args...)
 	if _, err := cmd.Output(); err != nil {
-		return nil, fmt.Errorf("tfswitch could not install terraform cli, path=%v, cache=%t: %w", path, cache, err)
+		return nil, fmt.Errorf(
+			"tfswitch could not install terraform cli, path=%v, cache=%t, cmd='%v': %w",
+			path, cache, cmd, err)
 	}
 
 	// Look for the 'terraform' binay in PATH
@@ -105,7 +107,7 @@ func installTfCLI(path string, cache bool, defaultVer string) (*tfexec.Terraform
 	}
 
 	// Create Terraform struct as provided by "hashicorp/terraform-exec"
-	tf, err := tfexec.NewTerraform(tfExecPath, tfExecPath)
+	tf, err := tfexec.NewTerraform(path, tfExecPath)
 	if err != nil {
 		return nil, fmt.Errorf("could not instantiate Terraform struct, path=%v: %w", path, err)
 	}

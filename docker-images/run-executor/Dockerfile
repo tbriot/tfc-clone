@@ -12,6 +12,7 @@ RUN useradd -m app
 USER app
 
 ENV HOME /home/app
+RUN alias ll='ls -al'
 
 # Install TFSwitch
 RUN curl -L https://raw.githubusercontent.com/warrensbox/terraform-switcher/master/install.sh | bash -s -- -b $HOME/.bin
