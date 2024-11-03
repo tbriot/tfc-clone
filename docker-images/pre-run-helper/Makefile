@@ -17,14 +17,17 @@ dist : pre-run-helper
 	docker build --tag tbriot/${DOCKER_IMAGE_NAME}:latest .
 
 test-local: dist
-	find ./shared-volume -type f -delete
+	docker volume rm shared-volume 2> /dev/null || echo "docker volume does not exist"
+	docker volume create shared-volume
 	docker run \
+		--name ${DOCKER_IMAGE_NAME} \
 		-e AWS_REGION=ca-central-1 \
 		-e AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID} \
 		-e AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY} \
 		-e AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN} \
-		-v ./shared-volume:/opt/shared-volume \
+		-v shared-volume:/opt/shared-volume \
 		tbriot/${DOCKER_IMAGE_NAME}:latest
+	docker container rm ${DOCKER_IMAGE_NAME}
 
 install : dist
 	aws ecr get-login-password --region ${AWS_REGION} | sudo docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
