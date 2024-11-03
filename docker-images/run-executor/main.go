@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
-	//"github.com/hashicorp/go-version"
 	"github.com/hashicorp/terraform-exec/tfexec"
+	"github.com/joho/godotenv"
 )
 
 const (
@@ -76,16 +76,24 @@ func main() {
 
 	// Load workspace variables
 	if err := loadVariables(); err != nil {
+		log.Fatalf("could not load workspace variables: %v", err)
 	}
 	fmt.Println("Workspace variables loaded successfully.")
+
+	// testing
+	fmt.Printf("AWS_ACCESS_KEY_ID=%v.\n", os.Getenv("AWS_ACCESS_KEY_ID"))
 
 	// terraform init
 	// terraform plan
 }
 
-// Load environment variables from dotfile
+// Load environment variables from .env file
 func loadVariables() error {
-	// TODO: load env vars from dotfile
+	dotenvFilepath := filepath.Join(SHARED_VOLUME_MOUNT_PATH, DOTENV_REL_FILE_PATH)
+	err := godotenv.Load(dotenvFilepath)
+	if err != nil {
+		return fmt.Errorf("Error loading .env file, filepath=%v: %w", dotenvFilepath, err)
+	}
 	return nil
 }
 
