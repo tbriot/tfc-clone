@@ -29,7 +29,8 @@ const (
 	DOTENV_REL_FILE_PATH     string = "/.env"
 )
 
-// TO
+// TODO: get output in logs
+// TODO: use cache for providers to cut down init time
 func mustRunTfInit(tf *tfexec.Terraform) {
 	defer timeTrack(time.Now(), "terraform-init")
 	err := tf.Init(context.Background())
@@ -37,25 +38,6 @@ func mustRunTfInit(tf *tfexec.Terraform) {
 		log.Fatalf("Error running tf init: %t\n", err)
 	}
 	return
-}
-
-func tfInit() {
-	defer timeTrack(time.Now(), "tf-init")
-
-	dirname, err := os.UserHomeDir()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	cmd := exec.Command("terraform", "init", "-no-color")
-	cmd.Dir = filepath.Join(dirname, SHARED_VOLUME_MOUNT_PATH+TF_CONFIG_REL_DIR_PATH)
-	stdout, err := cmd.Output()
-
-	if err != nil {
-		log.Println("Error while applying terraform init: " + err.Error())
-	}
-	// Print the output
-	log.Println("Ouput of tf init: " + string(stdout))
 }
 
 func main() {
@@ -84,6 +66,8 @@ func main() {
 	fmt.Printf("AWS_ACCESS_KEY_ID=%v.\n", os.Getenv("AWS_ACCESS_KEY_ID"))
 
 	// terraform init
+	mustRunTfInit(tf)
+
 	// terraform plan
 }
 
