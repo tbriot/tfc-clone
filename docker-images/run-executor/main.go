@@ -17,25 +17,42 @@ const (
 	// Caching
 	CACHE_MOUNPOINT       string = "/opt/tfc-cache"
 	CACHE_TF_INSTALLATION bool   = true
+	CACHE_TF_PLUGINS      bool   = true
 
 	// Terraform CLI
 	TF_EXEC_PATH             string = "/home/app/.bin/terraform"
 	TF_VERSIONS_DIR_REL_PATH string = "/terraform"
 	DEFAULT_TF_CLI_VERSION   string = "1.9.8"
+	// Terraform plugins
+	//TF_PLUGIN_CACHE_DIR_REL_PATH string = "/.terraform.d/plugin-cache"
 
 	// Define where terraform config and dotenv file are written on the disk
 	SHARED_VOLUME_MOUNT_PATH string = "/opt/shared-volume"
 	TF_CONFIG_REL_DIR_PATH   string = "/tfconfig"
 	DOTENV_REL_FILE_PATH     string = "/.env"
+	TF_PLAN_REL_FILE_PATH    string = "/tfplan"
 )
 
 // TODO: get output in logs
-// TODO: use cache for providers to cut down init time
 func mustRunTfInit(tf *tfexec.Terraform) {
 	defer timeTrack(time.Now(), "terraform-init")
+
+	fmt.Println("Running terraform init command...")
 	err := tf.Init(context.Background())
 	if err != nil {
 		log.Fatalf("Error running tf init: %t\n", err)
+	}
+	return
+}
+
+func mustRunTfPlan(tf *tfexec.Terraform) {
+	defer timeTrack(time.Now(), "terraform-plan")
+
+	tfPlanFilePath := SHARED_VOLUME_MOUNT_PATH + TF_PLAN_REL_FILE_PATH
+	fmt.Printf("Running terraform plan command. Plan will be saved to %v...\n", tfPlanFilePath)
+	_, err := tf.Plan(context.Background(), tfexec.Out(tfPlanFilePath))
+	if err != nil {
+		log.Fatalf("Error running tf plan: %t\n", err)
 	}
 	return
 }
@@ -62,13 +79,11 @@ func main() {
 	}
 	fmt.Println("Workspace variables loaded successfully.")
 
-	// testing
-	fmt.Printf("AWS_ACCESS_KEY_ID=%v.\n", os.Getenv("AWS_ACCESS_KEY_ID"))
-
 	// terraform init
 	mustRunTfInit(tf)
 
 	// terraform plan
+	mustRunTfPlan(tf)
 }
 
 // Load environment variables from .env file

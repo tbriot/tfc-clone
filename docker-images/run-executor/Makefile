@@ -9,7 +9,7 @@ all : run-executor
 
 SHELL=/bin/bash
 
-run-executor : ${WATCHED_SOURCES} Dockerfile
+run-executor : ${WATCHED_SOURCES} Dockerfile .terraformrc
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o run-executor main.go
 
 dist : run-executor
