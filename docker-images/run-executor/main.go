@@ -27,10 +27,11 @@ const (
 	//TF_PLUGIN_CACHE_DIR_REL_PATH string = "/.terraform.d/plugin-cache"
 
 	// Define where terraform config and dotenv file are written on the disk
-	SHARED_VOLUME_MOUNT_PATH string = "/opt/shared-volume"
-	TF_CONFIG_REL_DIR_PATH   string = "/tfconfig"
-	DOTENV_REL_FILE_PATH     string = "/.env"
-	TF_PLAN_REL_FILE_PATH    string = "/tfplan"
+	SHARED_VOLUME_MOUNT_PATH  string = "/opt/shared-volume"
+	TF_CONFIG_REL_DIR_PATH    string = "/tfconfig"
+	DOTENV_REL_FILE_PATH      string = "/.env"
+	TF_PLAN_REL_FILE_PATH     string = "/tfplan"
+	TF_PLAN_LOG_REL_FILE_PATH string = "/tfplan.log"
 )
 
 // TODO: get output in logs
@@ -49,8 +50,16 @@ func mustRunTfPlan(tf *tfexec.Terraform) {
 	defer timeTrack(time.Now(), "terraform-plan")
 
 	tfPlanFilePath := SHARED_VOLUME_MOUNT_PATH + TF_PLAN_REL_FILE_PATH
+	tfPlanLogFilePath := SHARED_VOLUME_MOUNT_PATH + TF_PLAN_LOG_REL_FILE_PATH
+
+	logFileWriter, err := os.OpenFile(tfPlanLogFilePath, os.O_WRONLY|os.O_CREATE, 0600)
+	if err != nil {
+		log.Fatalf("Could not open file %v: %t\n", logFileWriter, err)
+	}
+	defer logFileWriter.Close()
+
 	fmt.Printf("Running terraform plan command. Plan will be saved to %v...\n", tfPlanFilePath)
-	_, err := tf.Plan(context.Background(), tfexec.Out(tfPlanFilePath))
+	_, err = tf.PlanJSON(context.Background(), logFileWriter, tfexec.Out(tfPlanFilePath))
 	if err != nil {
 		log.Fatalf("Error running tf plan: %t\n", err)
 	}
