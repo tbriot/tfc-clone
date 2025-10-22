@@ -1,5 +1,5 @@
 terraform {
-  required_version = "~> 1.9.6"
+  required_version = "~> 1.8.3"
 
   required_providers {
     aws = {
@@ -7,17 +7,8 @@ terraform {
       version = "~> 5.69.0"
     }
   }
-  cloud {
-    organization = "tbriot-org"
-    workspaces {
-      name = "terraform-cloud-test"
-    }
-  }
-
-
 }
 
 provider "aws" {
   region = "ca-central-1"
-
 }
